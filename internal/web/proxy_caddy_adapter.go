@@ -528,23 +528,22 @@ func (a *caddyProxyAdapter) BackendSupport() ProxyBackendSupport {
 
 // ---- UUID resolution ----
 
-// resolveHostID maps a legacy int ID to a UUID.
-// The int ID is the 1-based index in the ordered host list.
-// This is a transitional approach until the web layer fully uses UUIDs.
-func (a *caddyProxyAdapter) resolveHostID(ctx context.Context, id int) (uuid.UUID, error) {
+// resolveHostID maps a legacy hashed int ID back to its UUID.
+// The web layer uses hashUUIDToInt for backwards compatibility
+// with templates that still expect integer IDs.
+func (a *caddyProxyAdapter) resolveHostID(ctx context.Context, hashID int) (uuid.UUID, error) {
 	hosts, err := a.svc.ListHosts(ctx)
 	if err != nil {
 		return uuid.Nil, err
 	}
 
-	// Try parsing as UUID string first (if templates pass uuid as param)
-	// The id parameter comes from chi URL params which are strings.
-	// But since the interface uses int, we fall back to index-based.
-	idx := id - 1
-	if idx < 0 || idx >= len(hosts) {
-		return uuid.Nil, fmt.Errorf("proxy host not found: index %d", id)
+	for _, host := range hosts {
+		if hashUUIDToInt(host.ID) == hashID {
+			return host.ID, nil
+		}
 	}
-	return hosts[idx].ID, nil
+
+	return uuid.Nil, fmt.Errorf("proxy host not found: id %d", hashID)
 }
 
 // proxyHostToView converts a ProxyHost model to the legacy ProxyHostView.
