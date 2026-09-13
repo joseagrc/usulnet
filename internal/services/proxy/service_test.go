@@ -868,3 +868,24 @@ func TestCreateDNSProvider_UnsupportedProvider(t *testing.T) {
 		t.Error("expected error for unsupported DNS provider")
 	}
 }
+func TestCanonicalDomainPair(t *testing.T) {
+	tests := []struct {
+		input string
+		want  []string
+	}{
+		{"example.com", []string{"example.com", "www.example.com"}},
+		{"www.example.com", []string{"example.com", "www.example.com"}},
+		{" APP.EXAMPLE.COM ", []string{"app.example.com", "www.app.example.com"}},
+	}
+	for _, tt := range tests {
+		got := canonicalDomainPair(tt.input)
+		if len(got) != len(tt.want) {
+			t.Fatalf("%q: got %#v", tt.input, got)
+		}
+		for i := range got {
+			if got[i] != tt.want[i] {
+				t.Fatalf("%q: got %#v, want %#v", tt.input, got, tt.want)
+			}
+		}
+	}
+}

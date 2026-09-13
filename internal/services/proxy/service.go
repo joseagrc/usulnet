@@ -10,6 +10,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -600,7 +601,7 @@ func (s *Service) AutoProxyFromLabels(ctx context.Context, containerID, containe
 	if existing != nil {
 		// Update existing
 		name := containerName
-		newDomains := []string{domain}
+		newDomains := canonicalDomainPair(domain)
 		newPort := port
 		scheme := models.ProxyUpstreamHTTP
 		_, err = s.UpdateHost(ctx, existing.ID, &models.UpdateProxyHostInput{
@@ -618,7 +619,7 @@ func (s *Service) AutoProxyFromLabels(ctx context.Context, containerID, containe
 	// Create new
 	_, err = s.CreateHost(ctx, &models.CreateProxyHostInput{
 		Name:              containerName,
-		Domains:           []string{domain},
+		Domains:           canonicalDomainPair(domain),
 		UpstreamScheme:    models.ProxyUpstreamHTTP,
 		UpstreamHost:      containerName,
 		UpstreamPort:      port,
@@ -633,6 +634,18 @@ func (s *Service) AutoProxyFromLabels(ctx context.Context, containerID, containe
 	}, nil)
 
 	return err
+}
+
+// canonicalDomainPair returns the root and canonical www alias for a deployment.
+// Supplying either form produces one proxy host, so Caddy can redirect the root
+// to www without creating duplicate routes.
+func canonicalDomainPair(domain string) []string {
+	domain = strings.ToLower(strings.TrimSpace(domain))
+	root := strings.TrimPrefix(domain, "www.")
+	if root == "" {
+		return []string{domain}
+	}
+	return []string{root, "www." + root}
 }
 
 // ============================================================================
