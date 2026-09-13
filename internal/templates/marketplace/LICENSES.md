@@ -22,6 +22,7 @@ silently.
 | `cowrie` | Cowrie | `docker.io/cowrie/cowrie:2.5.0` | BSD-3-Clause | Yes | Reference: https://github.com/cowrie/cowrie/blob/master/LICENSE.rst |
 | `dionaea` | DinoTools/dionaea | `docker.io/dinotools/dionaea:0.11.0` | GPL-2.0-or-later | Yes | Reference: https://github.com/DinoTools/dionaea/blob/master/LICENSE |
 | `endlessh` | linuxserver/endlessh (skeeto/endlessh) | `lscr.io/linuxserver/endlessh:1.1` | GPL-3.0-or-later | Yes | Reference: https://github.com/skeeto/endlessh/blob/master/COPYING |
+| `mailcatcher` | MailCatcher | `docker.io/sj26/mailcatcher:latest` | MIT | Yes | Reference: https://github.com/sj26/mailcatcher/blob/main/LICENSE |
 | `tor-socks-proxy` | PeterDaveHello/tor-socks-proxy (Tor Project) | `docker.io/peterdavehello/tor-socks-proxy:0.4.8` | BSD-3-Clause | Yes | Reference: https://github.com/PeterDaveHello/tor-socks-proxy/blob/master/LICENSE — Tor itself ships under the modified BSD maintained by the Tor Project |
 
 ## AGPL compatibility policy
