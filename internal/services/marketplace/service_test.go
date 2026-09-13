@@ -333,10 +333,12 @@ func (f *fakeStackInstaller) Delete(_ context.Context, _ uuid.UUID, _ bool) erro
 }
 
 type fakeExposureManager struct {
-	created *models.CreateProxyHostInput
-	host    *models.ProxyHost
-	err     error
-	deleted int
+	created     *models.CreateProxyHostInput
+	host        *models.ProxyHost
+	err         error
+	activateErr error
+	activated   int
+	deleted     int
 }
 
 func (f *fakeExposureManager) CreateHost(_ context.Context, input *models.CreateProxyHostInput, _ *uuid.UUID) (*models.ProxyHost, error) {
@@ -353,6 +355,11 @@ func (f *fakeExposureManager) CreateHost(_ context.Context, input *models.Create
 func (f *fakeExposureManager) DeleteHost(_ context.Context, _ uuid.UUID, _ *uuid.UUID) error {
 	f.deleted++
 	return nil
+}
+
+func (f *fakeExposureManager) ActivateCanonicalWWW(_ context.Context, _ uuid.UUID, _ *uuid.UUID) error {
+	f.activated++
+	return f.activateErr
 }
 
 func (f *fakeStackInstaller) Create(ctx context.Context, hostID uuid.UUID, input *models.CreateStackInput) (*models.Stack, error) {
@@ -631,6 +638,9 @@ func TestService_InstallAppWithExposure(t *testing.T) {
 	if inst == nil || proxy.created == nil {
 		t.Fatal("installation or proxy was not created")
 	}
+	if proxy.activated != 1 {
+		t.Fatalf("canonical activation count = %d", proxy.activated)
+	}
 	if proxy.created.UpstreamHost != "demo-web" || proxy.created.Domains[1] != "www.example.com" {
 		t.Fatalf("proxy input = %#v", proxy.created)
 	}
@@ -721,6 +731,28 @@ func TestService_InstallAppPublicProbeRollback(t *testing.T) {
 	})
 	if err == nil || stacks.deleted != 1 || proxy.deleted != 1 {
 		t.Fatalf("expected proxy and stack rollback, err=%v stacks=%d proxy=%d", err, stacks.deleted, proxy.deleted)
+	}
+}
+
+func TestService_InstallAppCanonicalActivationRollback(t *testing.T) {
+	apps := newMemAppRepo()
+	stacks := &fakeStackInstaller{}
+	proxy := &fakeExposureManager{activateErr: stderrors.New("www certificate unavailable")}
+	svc := NewService(apps, newMemInstallRepo(), newMemReviewRepo(), stacks, nil, nil)
+	svc.SetExposureManager(proxy)
+	svc.dnsCheck = func(context.Context, []string) error { return nil }
+	svc.probe = func(context.Context, string) error { return nil }
+	svc.publicProbe = func(context.Context, []string) error { return nil }
+	appID := uuid.New()
+	_ = apps.Create(context.Background(), &models.MarketplaceApp{
+		ID: appID, Slug: "alpha", Name: "Alpha", ComposeTemplate: "services:\n  web:\n    image: nginx\n",
+	})
+
+	_, err := svc.InstallApp(context.Background(), appID, uuid.New(), InstallOptions{
+		Name: "demo", Exposure: &ExposureOptions{Domain: "example.com", Service: "web", Port: 80},
+	})
+	if err == nil || stacks.deleted != 1 || proxy.deleted != 1 {
+		t.Fatalf("expected canonical activation rollback, err=%v stacks=%d proxy=%d", err, stacks.deleted, proxy.deleted)
 	}
 }
 

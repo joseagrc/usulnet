@@ -249,6 +249,30 @@ func TestBuildConfig_MultipleDomains(t *testing.T) {
 	}
 }
 
+func TestBuildConfig_CanonicalWWWTLSGate(t *testing.T) {
+	h := testHost(uuid.New())
+	h.Domains = []string{"example.com", "www.example.com"}
+	h.SSLMode = models.ProxySSLModeAuto
+	h.SSLForceHTTPS = true
+
+	before := BuildConfig([]*models.ProxyHost{h}, nil, "", "", "", "/certs", "/acme")
+	if strings.Contains(before, "return 308 https://www.example.com$request_uri;") {
+		t.Fatal("canonical redirect emitted before TLS promotion")
+	}
+	if !strings.Contains(before, "server_name example.com www.example.com;") {
+		t.Fatal("both domains must proxy before TLS promotion")
+	}
+
+	h.CanonicalWWWEnabled = true
+	after := BuildConfig([]*models.ProxyHost{h}, nil, "", "", "", "/certs", "/acme")
+	if !strings.Contains(after, "return 308 https://www.example.com$request_uri;") {
+		t.Fatal("canonical redirect missing after TLS promotion")
+	}
+	if !strings.Contains(after, "server_name www.example.com;") {
+		t.Fatal("www canonical proxy server missing")
+	}
+}
+
 func TestUpstreamName(t *testing.T) {
 	id := uuid.MustParse("12345678-1234-1234-1234-123456789abc")
 	h := &models.ProxyHost{ID: id}

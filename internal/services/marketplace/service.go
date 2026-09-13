@@ -110,6 +110,7 @@ type stackDeleter interface {
 // after the reverse-proxy backend is initialized.
 type ExposureManager interface {
 	CreateHost(ctx context.Context, input *models.CreateProxyHostInput, userID *uuid.UUID) (*models.ProxyHost, error)
+	ActivateCanonicalWWW(ctx context.Context, id uuid.UUID, userID *uuid.UUID) error
 	DeleteHost(ctx context.Context, id uuid.UUID, userID *uuid.UUID) error
 }
 
@@ -602,6 +603,11 @@ func (s *Service) InstallApp(ctx context.Context, appID, hostID uuid.UUID, opts 
 				return nil, fmt.Errorf("create public proxy: %w", err)
 			}
 			return nil, fmt.Errorf("create public proxy: synchronization did not become active")
+		}
+		if err := s.exposure.ActivateCanonicalWWW(ctx, proxyHost.ID, opts.UserID); err != nil {
+			_ = s.exposure.DeleteHost(context.Background(), proxyHost.ID, opts.UserID)
+			rollbackStack()
+			return nil, fmt.Errorf("activate canonical www: %w", err)
 		}
 		if s.publicProbe == nil {
 			s.publicProbe = waitForPublicEndpoint

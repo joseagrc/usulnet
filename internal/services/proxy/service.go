@@ -10,8 +10,10 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -58,6 +60,8 @@ type Service struct {
 
 	// Sync mutex to prevent concurrent config pushes
 	syncMu sync.Mutex
+
+	canonicalTLSProbe func(context.Context, string) error
 }
 
 // NewService creates a new proxy service with the given backend.
@@ -73,15 +77,16 @@ func NewService(
 	log *logger.Logger,
 ) *Service {
 	return &Service{
-		hosts:   hosts,
-		headers: headers,
-		certs:   certs,
-		dns:     dns,
-		audit:   audit,
-		backend: backend,
-		enc:     enc,
-		cfg:     cfg,
-		logger:  log.Named("proxy"),
+		hosts:             hosts,
+		headers:           headers,
+		certs:             certs,
+		dns:               dns,
+		audit:             audit,
+		backend:           backend,
+		enc:               enc,
+		cfg:               cfg,
+		logger:            log.Named("proxy"),
+		canonicalTLSProbe: waitForTrustedCanonicalTLS,
 	}
 }
 
@@ -244,6 +249,12 @@ func (s *Service) UpdateHost(ctx context.Context, id uuid.UUID, input *models.Up
 	if input.HealthCheckInterval != nil {
 		h.HealthCheckInterval = *input.HealthCheckInterval
 	}
+	// Domain or certificate changes invalidate the prior TLS proof. The flag is
+	// intentionally not part of UpdateProxyHostInput: only ActivateCanonicalWWW
+	// may promote a permanent redirect after a fresh trusted-TLS probe.
+	if input.Domains != nil || input.SSLMode != nil || input.CertificateID != nil || input.DNSProviderID != nil {
+		h.CanonicalWWWEnabled = false
+	}
 
 	h.UpdatedBy = userID
 
@@ -300,6 +311,94 @@ func (s *Service) DisableHost(ctx context.Context, id uuid.UUID, userID *uuid.UU
 	disabled := false
 	_, err := s.UpdateHost(ctx, id, &models.UpdateProxyHostInput{Enabled: &disabled}, userID)
 	return err
+}
+
+// ActivateCanonicalWWW safely promotes www to the canonical origin. Both
+// domains proxy to the application until www presents a trusted certificate;
+// only then is the permanent root redirect persisted and synchronized.
+func (s *Service) ActivateCanonicalWWW(ctx context.Context, id uuid.UUID, userID *uuid.UUID) error {
+	h, err := s.hosts.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if h.CanonicalWWWEnabled {
+		return nil
+	}
+	canonical := canonicalWWWDomain(h.Domains)
+	if canonical == "" {
+		return fmt.Errorf("canonical www activation requires a root/www domain pair")
+	}
+	probe := s.canonicalTLSProbe
+	if probe == nil {
+		probe = waitForTrustedCanonicalTLS
+	}
+	if err := probe(ctx, canonical); err != nil {
+		return fmt.Errorf("canonical www TLS is not ready: %w", err)
+	}
+
+	h.CanonicalWWWEnabled = true
+	h.UpdatedBy = userID
+	if err := s.hosts.Update(ctx, h); err != nil {
+		return fmt.Errorf("persist canonical www activation: %w", err)
+	}
+	if err := s.Sync(ctx); err != nil {
+		// Keep the database and generated configuration safe and consistent.
+		h.CanonicalWWWEnabled = false
+		_ = s.hosts.Update(context.Background(), h)
+		_ = s.Sync(context.Background())
+		_ = s.hosts.UpdateStatus(context.Background(), h.ID, models.ProxyHostStatusError, err.Error())
+		return fmt.Errorf("sync canonical www activation: %w", err)
+	}
+	_ = s.hosts.UpdateStatus(ctx, h.ID, models.ProxyHostStatusActive, "")
+	s.auditLog(ctx, h.HostID, userID, "canonical_www_activate", "proxy_host", h.ID, h.Name, canonical)
+	return nil
+}
+
+func canonicalWWWDomain(domains []string) string {
+	roots := make(map[string]struct{}, len(domains))
+	for _, domain := range domains {
+		domain = strings.ToLower(strings.TrimSpace(domain))
+		if domain != "" && !strings.HasPrefix(domain, "www.") {
+			roots[domain] = struct{}{}
+		}
+	}
+	for _, domain := range domains {
+		domain = strings.ToLower(strings.TrimSpace(domain))
+		if strings.HasPrefix(domain, "www.") {
+			if _, ok := roots[strings.TrimPrefix(domain, "www.")]; ok {
+				return domain
+			}
+		}
+	}
+	return ""
+}
+
+func waitForTrustedCanonicalTLS(ctx context.Context, domain string) error {
+	client := &http.Client{
+		Timeout: 8 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	deadline := time.Now().Add(90 * time.Second)
+	var lastErr error
+	for {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+domain+"/", nil)
+		response, err := client.Do(req)
+		if err == nil {
+			_ = response.Body.Close()
+			return nil
+		}
+		lastErr = err
+		if ctx.Err() != nil || time.Now().After(deadline) {
+			return fmt.Errorf("%s did not present a trusted certificate: %w", domain, lastErr)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(3 * time.Second):
+		}
+	}
 }
 
 // SetCustomHeaders replaces all custom headers for a proxy host and syncs.
@@ -599,7 +698,7 @@ func (s *Service) AutoProxyFromLabels(ctx context.Context, containerID, containe
 	}
 
 	if existing != nil {
-		// Update existing
+		// Return to the safe dual-proxy phase whenever labels change.
 		name := containerName
 		newDomains := canonicalDomainPair(domain)
 		newPort := port
@@ -613,11 +712,14 @@ func (s *Service) AutoProxyFromLabels(ctx context.Context, containerID, containe
 			SSLMode:         &sslMode,
 			EnableWebSocket: &websocket,
 		}, nil)
-		return err
+		if err != nil || sslMode == models.ProxySSLModeNone {
+			return err
+		}
+		return s.ActivateCanonicalWWW(ctx, existing.ID, nil)
 	}
 
 	// Create new
-	_, err = s.CreateHost(ctx, &models.CreateProxyHostInput{
+	host, err := s.CreateHost(ctx, &models.CreateProxyHostInput{
 		Name:              containerName,
 		Domains:           canonicalDomainPair(domain),
 		UpstreamScheme:    models.ProxyUpstreamHTTP,
@@ -633,7 +735,13 @@ func (s *Service) AutoProxyFromLabels(ctx context.Context, containerID, containe
 		ContainerName:     containerName,
 	}, nil)
 
-	return err
+	if err != nil || sslMode == models.ProxySSLModeNone {
+		return err
+	}
+	if host == nil || host.Status != models.ProxyHostStatusActive {
+		return fmt.Errorf("proxy host did not synchronize before canonical TLS validation")
+	}
+	return s.ActivateCanonicalWWW(ctx, host.ID, nil)
 }
 
 // canonicalDomainPair returns the root and canonical www alias for a deployment.

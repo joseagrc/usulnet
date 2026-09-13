@@ -63,11 +63,14 @@ type ProxyHost struct {
 	DNSProviderID *uuid.UUID   `json:"dns_provider_id,omitempty" db:"dns_provider_id"` // For DNS challenge
 
 	// Headers & behavior
-	EnableWebSocket   bool          `json:"enable_websocket" db:"enable_websocket"`
-	EnableCompression bool          `json:"enable_compression" db:"enable_compression"` // gzip + zstd
-	EnableHSTS        bool          `json:"enable_hsts" db:"enable_hsts"`
-	EnableHTTP2       bool          `json:"enable_http2" db:"enable_http2"`
-	CustomHeaders     []ProxyHeader `json:"custom_headers,omitempty" db:"-"`
+	EnableWebSocket   bool `json:"enable_websocket" db:"enable_websocket"`
+	EnableCompression bool `json:"enable_compression" db:"enable_compression"` // gzip + zstd
+	EnableHSTS        bool `json:"enable_hsts" db:"enable_hsts"`
+	EnableHTTP2       bool `json:"enable_http2" db:"enable_http2"`
+	// CanonicalWWWEnabled is promoted only after the www endpoint has a
+	// trusted certificate. Until then both domains proxy normally.
+	CanonicalWWWEnabled bool          `json:"canonical_www_enabled" db:"canonical_www_enabled"`
+	CustomHeaders       []ProxyHeader `json:"custom_headers,omitempty" db:"-"`
 
 	// Health check
 	HealthCheckEnabled  bool   `json:"health_check_enabled" db:"health_check_enabled"`

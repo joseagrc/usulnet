@@ -296,7 +296,78 @@ func newTestService(t *testing.T) (*Service, *mockHostRepo, *mockBackend, *mockA
 	}
 
 	svc := NewService(hostRepo, headerRepo, certRepo, dnsRepo, auditRepo, enc, backend, cfg, log)
+	svc.canonicalTLSProbe = func(context.Context, string) error { return nil }
 	return svc, hostRepo, backend, auditRepo
+}
+
+func TestActivateCanonicalWWWTLSGated(t *testing.T) {
+	svc, hosts, backend, audit := newTestService(t)
+	host := &models.ProxyHost{
+		ID: uuid.New(), HostID: svc.cfg.DefaultHostID, Name: "app",
+		Domains: []string{"app.example.com", "www.app.example.com"}, Enabled: true,
+	}
+	hosts.hosts = []*models.ProxyHost{host}
+	probed := ""
+	svc.canonicalTLSProbe = func(_ context.Context, domain string) error {
+		probed = domain
+		return nil
+	}
+
+	if err := svc.ActivateCanonicalWWW(context.Background(), host.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if probed != "www.app.example.com" || !host.CanonicalWWWEnabled {
+		t.Fatalf("probe=%q canonical=%v", probed, host.CanonicalWWWEnabled)
+	}
+	if backend.syncCalls != 1 || len(audit.entries) != 1 {
+		t.Fatalf("sync=%d audit=%d", backend.syncCalls, len(audit.entries))
+	}
+}
+
+func TestActivateCanonicalWWWLeavesBothDomainsWhenTLSFails(t *testing.T) {
+	svc, hosts, backend, _ := newTestService(t)
+	host := &models.ProxyHost{
+		ID: uuid.New(), HostID: svc.cfg.DefaultHostID,
+		Domains: []string{"app.example.com", "www.app.example.com"}, Enabled: true,
+	}
+	hosts.hosts = []*models.ProxyHost{host}
+	svc.canonicalTLSProbe = func(context.Context, string) error { return errors.New("bad certificate") }
+
+	if err := svc.ActivateCanonicalWWW(context.Background(), host.ID, nil); err == nil {
+		t.Fatal("expected TLS failure")
+	}
+	if host.CanonicalWWWEnabled || backend.syncCalls != 0 {
+		t.Fatalf("unsafe promotion: canonical=%v sync=%d", host.CanonicalWWWEnabled, backend.syncCalls)
+	}
+}
+
+func TestCanonicalWWWDomainRequiresMatchingRoot(t *testing.T) {
+	if got := canonicalWWWDomain([]string{"example.com", "www.other.example"}); got != "" {
+		t.Fatalf("mismatched www alias was accepted: %q", got)
+	}
+	if got := canonicalWWWDomain([]string{"Example.COM", "WWW.EXAMPLE.COM"}); got != "www.example.com" {
+		t.Fatalf("matching pair not normalized: %q", got)
+	}
+}
+
+func TestActivateCanonicalWWWRollsBackDatabaseWhenSyncFails(t *testing.T) {
+	svc, hosts, backend, _ := newTestService(t)
+	host := &models.ProxyHost{
+		ID: uuid.New(), HostID: svc.cfg.DefaultHostID,
+		Domains: []string{"app.example.com", "www.app.example.com"}, Enabled: true,
+	}
+	hosts.hosts = []*models.ProxyHost{host}
+	backend.syncErr = errors.New("backend unavailable")
+
+	if err := svc.ActivateCanonicalWWW(context.Background(), host.ID, nil); err == nil {
+		t.Fatal("expected sync failure")
+	}
+	if host.CanonicalWWWEnabled {
+		t.Fatal("database flag was not rolled back")
+	}
+	if backend.syncCalls != 2 {
+		t.Fatalf("sync calls = %d, want activation plus rollback", backend.syncCalls)
+	}
 }
 
 // ---------------------------------------------------------------------------

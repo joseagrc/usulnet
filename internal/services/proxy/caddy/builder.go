@@ -126,13 +126,28 @@ func BuildConfig(hosts []*models.ProxyHost, dnsProviders map[string]*models.Prox
 }
 
 // buildRoutes generates reverse-proxy and canonical-redirect routes for a proxy host.
-// If a www hostname is present it is the sole canonical origin; every other
-// hostname returns a permanent HTTPS redirect preserving the request URI.
+// A www hostname becomes canonical only after the service has verified its
+// trusted certificate. Before promotion, every domain remains a working proxy.
 func buildRoutes(h *models.ProxyHost) []Route {
+	if !h.CanonicalWWWEnabled {
+		return []Route{buildProxyRoute(h, h.Domains)}
+	}
 	canonical := ""
+	roots := make(map[string]struct{}, len(h.Domains))
 	for _, domain := range h.Domains {
-		if strings.HasPrefix(strings.ToLower(domain), "www.") {
-			canonical = domain
+		normalized := strings.ToLower(strings.TrimSpace(domain))
+		if normalized != "" && !strings.HasPrefix(normalized, "www.") {
+			roots[normalized] = struct{}{}
+		}
+	}
+	for _, domain := range h.Domains {
+		normalized := strings.ToLower(strings.TrimSpace(domain))
+		if strings.HasPrefix(normalized, "www.") {
+			if _, ok := roots[strings.TrimPrefix(normalized, "www.")]; ok {
+				canonical = domain
+			}
+		}
+		if canonical != "" {
 			break
 		}
 	}

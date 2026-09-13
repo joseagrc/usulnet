@@ -79,7 +79,12 @@ func buildUpstream(h *models.ProxyHost) string {
 
 func buildServerBlock(h *models.ProxyHost, customCerts map[string]*models.ProxyCertificate, listenHTTP, listenHTTPS, certDir, acmeWebRoot string) string {
 	hasSSL := h.SSLMode != models.ProxySSLModeNone
-	domains := strings.Join(h.Domains, " ")
+	httpDomains := strings.Join(h.Domains, " ")
+	proxyDomains := httpDomains
+	canonical, aliases := nginxCanonicalDomains(h)
+	if canonical != "" {
+		proxyDomains = canonical
+	}
 
 	var b strings.Builder
 
@@ -89,14 +94,32 @@ func buildServerBlock(h *models.ProxyHost, customCerts map[string]*models.ProxyC
 		b.WriteString("server {\n")
 		b.WriteString(fmt.Sprintf("    listen %s;\n", listenHTTP))
 		b.WriteString(fmt.Sprintf("    listen [::]:%s;\n", listenHTTP))
-		b.WriteString(fmt.Sprintf("    server_name %s;\n\n", domains))
+		b.WriteString(fmt.Sprintf("    server_name %s;\n\n", httpDomains))
 		// ACME challenge location (always serve, even during redirect)
 		b.WriteString("    location /.well-known/acme-challenge/ {\n")
 		b.WriteString(fmt.Sprintf("        root %s;\n", acmeWebRoot))
 		b.WriteString("    }\n\n")
 		b.WriteString("    location / {\n")
-		b.WriteString("        return 301 https://$host$request_uri;\n")
+		if canonical != "" {
+			b.WriteString(fmt.Sprintf("        return 308 https://%s$request_uri;\n", canonical))
+		} else {
+			b.WriteString("        return 301 https://$host$request_uri;\n")
+		}
 		b.WriteString("    }\n")
+		b.WriteString("}\n\n")
+	}
+
+	// The alias HTTPS endpoint is only emitted after trusted TLS has been
+	// verified. It uses the same SAN certificate as the canonical host.
+	if canonical != "" && len(aliases) > 0 {
+		certPath, keyPath := certPaths(h, customCerts, certDir)
+		b.WriteString("server {\n")
+		b.WriteString(fmt.Sprintf("    listen %s ssl;\n", listenHTTPS))
+		b.WriteString(fmt.Sprintf("    listen [::]:%s ssl;\n", listenHTTPS))
+		b.WriteString(fmt.Sprintf("    server_name %s;\n", strings.Join(aliases, " ")))
+		b.WriteString(fmt.Sprintf("    ssl_certificate %s;\n", certPath))
+		b.WriteString(fmt.Sprintf("    ssl_certificate_key %s;\n", keyPath))
+		b.WriteString(fmt.Sprintf("    return 308 https://%s$request_uri;\n", canonical))
 		b.WriteString("}\n\n")
 	}
 
@@ -125,7 +148,7 @@ func buildServerBlock(h *models.ProxyHost, customCerts map[string]*models.ProxyC
 		b.WriteString(fmt.Sprintf("    listen [::]:%s;\n", listenHTTP))
 	}
 
-	b.WriteString(fmt.Sprintf("    server_name %s;\n\n", domains))
+	b.WriteString(fmt.Sprintf("    server_name %s;\n\n", proxyDomains))
 
 	// SSL configuration
 	if hasSSL {
@@ -219,6 +242,28 @@ func buildServerBlock(h *models.ProxyHost, customCerts map[string]*models.ProxyC
 	b.WriteString("}\n")
 
 	return b.String()
+}
+
+func nginxCanonicalDomains(h *models.ProxyHost) (string, []string) {
+	if !h.CanonicalWWWEnabled || h.SSLMode == models.ProxySSLModeNone {
+		return "", nil
+	}
+	roots := make(map[string]string, len(h.Domains))
+	for _, domain := range h.Domains {
+		normalized := strings.ToLower(strings.TrimSpace(domain))
+		if normalized != "" && !strings.HasPrefix(normalized, "www.") {
+			roots[normalized] = domain
+		}
+	}
+	for _, domain := range h.Domains {
+		normalized := strings.ToLower(strings.TrimSpace(domain))
+		if strings.HasPrefix(normalized, "www.") {
+			if root, ok := roots[strings.TrimPrefix(normalized, "www.")]; ok {
+				return domain, []string{root}
+			}
+		}
+	}
+	return "", nil
 }
 
 // certPaths resolves the SSL certificate and key file paths for a host.
