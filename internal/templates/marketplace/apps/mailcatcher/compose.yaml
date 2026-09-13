@@ -1,0 +1,8 @@
+services:
+  mailcatcher:
+    image: sj26/mailcatcher:latest
+    restart: unless-stopped
+
+    ports:
+      - "{{SMTP_PORT}}:1025"
+      - "{{WEB_PORT}}:1080"

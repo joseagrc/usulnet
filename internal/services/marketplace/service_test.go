@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/fr4nsys/usulnet/internal/models"
+	stacksvc "github.com/fr4nsys/usulnet/internal/services/stack"
 )
 
 // ----------------------------------------------------------------------------
@@ -327,6 +328,13 @@ func (f *fakeStackInstaller) Create(ctx context.Context, hostID uuid.UUID, input
 		return nil, f.fail
 	}
 	return &models.Stack{ID: uuid.New(), HostID: hostID, Name: input.Name, ComposeFile: input.ComposeFile}, nil
+}
+
+func (f *fakeStackInstaller) Deploy(ctx context.Context, id uuid.UUID) (*stacksvc.DeployResult, error) {
+	return &stacksvc.DeployResult{
+		StackID: id,
+		Success: true,
+	}, nil
 }
 
 // ----------------------------------------------------------------------------

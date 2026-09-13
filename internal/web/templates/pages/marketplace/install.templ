@@ -42,6 +42,7 @@ templ Install(data InstallData) {
 				}
 
 				<form method="POST" action={ templ.SafeURL("/marketplace/" + data.App.Slug + "/install") } class="space-y-4">
+				<input type="hidden" name="csrf_token" value={ data.PageData.CSRFToken }/>
 					<div>
 						<label class="block text-sm font-medium text-gray-300 mb-1">Stack name</label>
 						<input type="text" name="name" required placeholder={ data.App.Slug }

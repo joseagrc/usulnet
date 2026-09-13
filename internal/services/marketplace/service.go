@@ -37,6 +37,7 @@ import (
 
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
+	stacksvc "github.com/fr4nsys/usulnet/internal/services/stack"
 )
 
 // Sentinel errors returned by the service.
@@ -95,6 +96,7 @@ type ReviewRepository interface {
 // tested with a mock without importing the concrete stack package.
 type StackInstaller interface {
 	Create(ctx context.Context, hostID uuid.UUID, input *models.CreateStackInput) (*models.Stack, error)
+	Deploy(ctx context.Context, id uuid.UUID) (*stacksvc.DeployResult, error)
 }
 
 // CatalogSource enumerates the offline catalog entries. The
@@ -493,6 +495,20 @@ func (s *Service) InstallApp(ctx context.Context, appID, hostID uuid.UUID, opts 
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create stack: %w", err)
+	}
+
+	deployResult, err := s.stacks.Deploy(ctx, stack.ID)
+	if err != nil {
+		return nil, fmt.Errorf("deploy stack: %w", err)
+	}
+
+	if deployResult == nil || !deployResult.Success {
+		deployErr := "unknown deployment error"
+		if deployResult != nil && deployResult.Error != "" {
+			deployErr = deployResult.Error
+		}
+
+		return nil, fmt.Errorf("deploy stack failed: %s", deployErr)
 	}
 
 	configJSON, _ := json.Marshal(resolved)

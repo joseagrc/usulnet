@@ -1,0 +1,63 @@
+slug: mailcatcher
+name: MailCatcher
+description: SMTP testing server that catches outgoing email and displays it in a web interface.
+long_description: |
+  MailCatcher runs a simple SMTP server that captures outgoing email
+  without delivering it to real recipients.
+
+  It is useful for development, staging, QA, and testing environments
+  where applications need to send email safely without contacting
+  external mail servers.
+
+  Messages can be inspected from the built-in web interface, including
+  headers, HTML content, plain-text content, and attachments.
+
+  Image: docker.io/sj26/mailcatcher.
+
+  MailCatcher should not be used as a production SMTP delivery server.
+  It is intended only for development and testing.
+
+category: development
+
+icon: fa-envelope
+icon_color: "#4f9df8"
+
+version: "latest"
+manifest_version: 1
+
+website: https://mailcatcher.me/
+source: https://github.com/sj26/mailcatcher
+
+author: usulnet contributors
+license: MIT
+
+tags:
+  - smtp
+  - email
+  - development
+  - testing
+  - mail
+
+min_memory_mb: 128
+min_cpu_cores: 0.10
+
+is_official: true
+is_verified: true
+featured: false
+
+fields:
+  - key: SMTP_PORT
+    label: SMTP port
+    description: Host port used to receive SMTP messages.
+    type: text
+    default: "1025"
+    required: true
+    placeholder: "1025"
+
+  - key: WEB_PORT
+    label: Web interface port
+    description: Host port used to access the MailCatcher web interface.
+    type: text
+    default: "1080"
+    required: true
+    placeholder: "1080"

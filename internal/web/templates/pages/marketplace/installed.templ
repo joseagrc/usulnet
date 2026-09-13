@@ -69,7 +69,7 @@ templ Installed(data InstalledData) {
 								<td class="p-4 text-sm text-gray-300">{ inst.Name }</td>
 								<td class="p-4 text-xs">
 									if inst.StackID != "" {
-										<a href={ templ.SafeURL("/stacks/" + inst.StackID) } class="text-primary-400 hover:text-primary-300">
+										<a href={ templ.SafeURL("/stacks/" + inst.Name) } class="text-primary-400 hover:text-primary-300">
 											View stack
 										</a>
 									} else {
@@ -90,6 +90,7 @@ templ Installed(data InstalledData) {
 								<td class="p-4">
 									<form method="POST" action={ templ.SafeURL("/marketplace/installations/" + inst.ID + "/uninstall") }
 										onsubmit="return confirm('Mark this app as uninstalled? The underlying stack stays — remove it from the Stacks page if you want to free its resources.');">
+									<input type="hidden" name="csrf_token" value={ data.PageData.CSRFToken }/>
 										<button type="submit" class="text-gray-400 hover:text-red-400 transition-colors" title="Mark as uninstalled">
 											<i aria-hidden="true" class="fas fa-trash"></i>
 										</button>
