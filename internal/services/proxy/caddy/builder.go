@@ -7,6 +7,7 @@ package caddy
 import (
 	"encoding/json"
 	"fmt"
+	"net/textproto"
 	"strings"
 
 	"github.com/fr4nsys/usulnet/internal/models"
@@ -324,6 +325,34 @@ func buildReverseProxy(h *models.ProxyHost) ReverseProxyHandler {
 				"X-Real-IP":         {"{http.request.remote.host}"},
 			},
 		},
+	}
+
+	// Apply custom upstream request headers after the defaults so an
+	// application-specific value can intentionally override a standard proxy
+	// header. The outer headers handler is not sufficient because header_up
+	// operations run later inside reverse_proxy.
+	for _, header := range h.CustomHeaders {
+		if header.Direction != "request" {
+			continue
+		}
+		name := textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(header.Name))
+		if name == "" {
+			continue
+		}
+		switch header.Operation {
+		case "set":
+			delete(rp.Headers.Request.Add, name)
+			rp.Headers.Request.Set[name] = []string{header.Value}
+		case "add":
+			if rp.Headers.Request.Add == nil {
+				rp.Headers.Request.Add = make(map[string][]string)
+			}
+			rp.Headers.Request.Add[name] = append(rp.Headers.Request.Add[name], header.Value)
+		case "delete":
+			delete(rp.Headers.Request.Set, name)
+			delete(rp.Headers.Request.Add, name)
+			rp.Headers.Request.Delete = append(rp.Headers.Request.Delete, name)
+		}
 	}
 
 	// Health checks

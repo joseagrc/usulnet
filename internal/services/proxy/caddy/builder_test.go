@@ -66,3 +66,23 @@ func TestBuildConfigLeavesSingleDomainAsProxy(t *testing.T) {
 		t.Fatalf("route count = %d, want 1", got)
 	}
 }
+
+func TestCustomRequestHeaderOverridesStandardProxyHeader(t *testing.T) {
+	host := &models.ProxyHost{
+		ID: uuid.New(), Enabled: true, Domains: []string{"www.example.com"},
+		UpstreamScheme: models.ProxyUpstreamHTTP, UpstreamHost: "app", UpstreamPort: 80,
+		CustomHeaders: []models.ProxyHeader{{
+			Direction: "request", Operation: "set",
+			Name: "x-forwarded-host", Value: "example.com",
+		}},
+	}
+	cfg := BuildConfig([]*models.ProxyHost{host}, nil, nil, "", "", "")
+	route := cfg.Apps.HTTP.Servers["usulnet"].Routes[0]
+	var proxy ReverseProxyHandler
+	if err := json.Unmarshal(route.Handle[len(route.Handle)-1], &proxy); err != nil {
+		t.Fatalf("decode reverse proxy: %v", err)
+	}
+	if got := proxy.Headers.Request.Set["X-Forwarded-Host"]; len(got) != 1 || got[0] != "example.com" {
+		t.Fatalf("custom upstream header = %#v", got)
+	}
+}
