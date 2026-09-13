@@ -1638,6 +1638,19 @@ func (h *Handler) SecurityIssueResolve(w http.ResponseWriter, r *http.Request) {
 // Update Action Handlers
 // ============================================================================
 
+// startContainerUpdate detaches a long-running container update from the HTTP
+// request. Pulling an image, creating a backup and waiting for Docker's health
+// check can take longer than a reverse proxy request timeout; retaining the
+// request context caused the browser to receive a 502 even when the update
+// ultimately completed successfully.
+func (h *Handler) startContainerUpdate(ctx context.Context, updatesSvc UpdateService, containerID string, backup bool, targetVersion string) {
+	go func() {
+		if err := updatesSvc.Apply(context.WithoutCancel(ctx), containerID, backup, targetVersion); err != nil {
+			h.logger.Error("container update failed", "container", containerID, "error", err)
+		}
+	}()
+}
+
 func (h *Handler) UpdateChangelog(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := getIDParam(r)
@@ -1684,21 +1697,13 @@ func (h *Handler) UpdateBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var succeeded, failed int
+	queued := 0
 	for _, cid := range containerIDs {
-		if err := updatesSvc.Apply(ctx, cid, true, ""); err != nil {
-			slog.Error("Failed to apply update", "container", cid, "error", err)
-			failed++
-		} else {
-			succeeded++
-		}
+		h.startContainerUpdate(ctx, updatesSvc, cid, true, "")
+		queued++
 	}
 
-	if failed > 0 {
-		h.setFlash(w, r, "warning", fmt.Sprintf("Updated %d containers, %d failed", succeeded, failed))
-	} else {
-		h.setFlash(w, r, "success", fmt.Sprintf("Successfully updated %d containers", succeeded))
-	}
+	h.setFlash(w, r, "success", fmt.Sprintf("Queued updates for %d containers; progress is shown in update history", queued))
 	h.redirect(w, r, "/updates")
 }
 
