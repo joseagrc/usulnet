@@ -243,7 +243,7 @@ type LogEncoder struct {
 // StaticResponseHandler returns a static HTTP response (used for redirections and error pages).
 type StaticResponseHandler struct {
 	Handler    string              `json:"handler"`               // "static_response"
-	StatusCode string              `json:"status_code,omitempty"` // e.g. "301", "302", "404", "410"
+	StatusCode int                 `json:"status_code,omitempty"` // e.g. 301, 302, 404, 410
 	Headers    map[string][]string `json:"headers,omitempty"`     // e.g. {"Location": ["https://..."]}
 	Body       string              `json:"body,omitempty"`
 	Close      bool                `json:"close,omitempty"`

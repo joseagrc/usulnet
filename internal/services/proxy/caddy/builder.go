@@ -33,8 +33,7 @@ func BuildConfig(hosts []*models.ProxyHost, dnsProviders map[string]*models.Prox
 			continue
 		}
 
-		route := buildRoute(h)
-		routes = append(routes, route)
+		routes = append(routes, buildRoutes(h)...)
 
 		// TLS policy per host
 		switch h.SSLMode {
@@ -126,8 +125,50 @@ func BuildConfig(hosts []*models.ProxyHost, dnsProviders map[string]*models.Prox
 	}
 }
 
-// buildRoute generates a Caddy route for a single proxy host.
-func buildRoute(h *models.ProxyHost) Route {
+// buildRoutes generates reverse-proxy and canonical-redirect routes for a proxy host.
+// If a www hostname is present it is the sole canonical origin; every other
+// hostname returns a permanent HTTPS redirect preserving the request URI.
+func buildRoutes(h *models.ProxyHost) []Route {
+	canonical := ""
+	for _, domain := range h.Domains {
+		if strings.HasPrefix(strings.ToLower(domain), "www.") {
+			canonical = domain
+			break
+		}
+	}
+	if canonical == "" {
+		return []Route{buildProxyRoute(h, h.Domains)}
+	}
+
+	aliases := make([]string, 0, len(h.Domains)-1)
+	for _, domain := range h.Domains {
+		if domain != canonical {
+			aliases = append(aliases, domain)
+		}
+	}
+
+	routes := make([]Route, 0, 2)
+	if len(aliases) > 0 {
+		redirect := StaticResponseHandler{
+			Handler:    "static_response",
+			StatusCode: 308,
+			Headers: map[string][]string{
+				"Location": {"https://" + canonical + "{http.request.uri}"},
+			},
+		}
+		routes = append(routes, Route{
+			ID:       "usulnet-" + h.ID.String() + "-canonical-redirect",
+			Match:    []MatchConfig{{Host: aliases}},
+			Handle:   []json.RawMessage{mustMarshal(redirect)},
+			Terminal: true,
+		})
+	}
+	routes = append(routes, buildProxyRoute(h, []string{canonical}))
+	return routes
+}
+
+// buildProxyRoute generates a Caddy reverse proxy route.
+func buildProxyRoute(h *models.ProxyHost, domains []string) Route {
 	handlers := make([]json.RawMessage, 0, 4)
 
 	// 1. Compression (before reverse_proxy so response is compressed)
@@ -223,7 +264,7 @@ func buildRoute(h *models.ProxyHost) Route {
 	return Route{
 		ID: "usulnet-" + h.ID.String(),
 		Match: []MatchConfig{
-			{Host: h.Domains},
+			{Host: domains},
 		},
 		Handle:   handlers,
 		Terminal: true,
