@@ -2018,12 +2018,8 @@ func (h *Handler) UpdateApplyTempl(w http.ResponseWriter, r *http.Request) {
 
 	backup := r.FormValue("backup") != "false"
 	targetVersion := strings.TrimSpace(r.FormValue("target_version"))
-	if err := updatesSvc.Apply(ctx, id, backup, targetVersion); err != nil {
-		h.logger.Error("failed to apply update", "container", id, "error", err)
-		h.setFlash(w, r, "error", "Update failed: "+err.Error())
-	} else {
-		h.setFlash(w, r, "success", "Update started successfully")
-	}
+	h.startContainerUpdate(ctx, updatesSvc, id, backup, targetVersion)
+	h.setFlash(w, r, "success", "Update queued; progress is shown in update history")
 
 	if r.Header.Get("HX-Request") == "true" {
 		w.Header().Set("HX-Redirect", "/updates")
@@ -2054,12 +2050,8 @@ func (h *Handler) UpdateManual(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := updatesSvc.Apply(ctx, containerID, backup, targetVersion); err != nil {
-		h.logger.Error("failed to apply manual update", "container", containerID, "version", targetVersion, "error", err)
-		h.setFlash(w, r, "error", "Update failed: "+err.Error())
-	} else {
-		h.setFlash(w, r, "success", "Manual update to "+targetVersion+" started successfully")
-	}
+	h.startContainerUpdate(ctx, updatesSvc, containerID, backup, targetVersion)
+	h.setFlash(w, r, "success", "Manual update to "+targetVersion+" queued; progress is shown in update history")
 
 	http.Redirect(w, r, "/updates", http.StatusSeeOther)
 }

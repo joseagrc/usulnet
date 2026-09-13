@@ -64,6 +64,12 @@ type ServiceConfig struct {
 	MaxConcurrentUpdates int
 }
 
+// minimumHealthCheckWait gives Docker enough time to run an image healthcheck
+// at least once after a replacement container starts. Docker's default health
+// check interval is 30 seconds, so a 30-second update window can otherwise
+// expire in the same instant as the first successful probe is recorded.
+const minimumHealthCheckWait = 90 * time.Second
+
 // DefaultServiceConfig returns default service configuration
 func DefaultServiceConfig() *ServiceConfig {
 	return &ServiceConfig{
@@ -543,6 +549,17 @@ func (s *Service) executeUpdate(ctx context.Context, update *models.Update, cont
 	if opts.HealthCheckWait > 0 {
 		healthWait = opts.HealthCheckWait
 	}
+	// A configured healthcheck is asynchronous. Do not let a user-facing
+	// 30-second default race Docker's first probe (notably for images such as
+	// Pi-hole, which use Docker's 30-second default interval).
+	effectiveHealthWait := effectiveHealthCheckWait(healthWait, containerInfo)
+	if effectiveHealthWait != healthWait {
+		log.Info("extending health-check wait to allow initial Docker probe",
+			"configured_wait", healthWait,
+			"effective_wait", effectiveHealthWait,
+		)
+	}
+	healthWait = effectiveHealthWait
 
 	maxRetries := s.config.DefaultMaxRetries
 	if opts.MaxRetries > 0 {
@@ -625,6 +642,13 @@ func (s *Service) rollbackContainer(ctx context.Context, update *models.Update, 
 	if err := s.dockerClient.ContainerStart(ctx, update.TargetID); err != nil {
 		log.Error("Failed to restart original container", "error", err)
 	}
+}
+
+func effectiveHealthCheckWait(configured time.Duration, containerInfo *dockertypes.ContainerJSON) time.Duration {
+	if containerInfo != nil && containerInfo.Config != nil && containerInfo.Config.Healthcheck != nil && configured < minimumHealthCheckWait {
+		return minimumHealthCheckWait
+	}
+	return configured
 }
 
 // waitForHealthy waits for a container to become healthy
