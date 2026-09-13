@@ -4,7 +4,11 @@
 
 package marketplace
 
-import "github.com/fr4nsys/usulnet/internal/web/templates/layouts"
+import (
+	"fmt"
+
+	"github.com/fr4nsys/usulnet/internal/web/templates/layouts"
+)
 
 // InstallData is the view model for the per-app install form.
 type InstallData struct {
@@ -12,6 +16,12 @@ type InstallData struct {
 	App      AppView
 	Fields   []FieldView
 	Error    string
+	Name              string
+	ExposePublicly    bool
+	ExposureDomain    string
+	ExposureService   string
+	ExposurePort      int
+	ExposureWebSocket bool
 }
 
 // FieldView is the input descriptor for one configurable field.
@@ -45,9 +55,35 @@ templ Install(data InstallData) {
 					<div>
 						<label class="block text-sm font-medium text-gray-300 mb-1">Stack name</label>
 						<input type="text" name="name" required placeholder={ data.App.Slug }
-							value={ data.App.Slug }
+							value={ installName(data) }
 							class="w-full px-3 py-2 bg-dark-600 border border-dark-500 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary-500" aria-label="Stack name"/>
 						<p class="text-xs text-gray-500 mt-1">This becomes the stack name. Lowercase letters, digits, and dashes work best.</p>
+					</div>
+
+					<div class="border-t border-dark-600 pt-4 space-y-3">
+						<label class="flex items-center gap-2 text-sm font-medium text-gray-300">
+							<input type="checkbox" name="expose_publicly" value="true" checked?={ data.ExposePublicly } class="rounded border-dark-500 bg-dark-600"/>
+							Expose this application through the reverse proxy
+						</label>
+						<p class="text-xs text-gray-500">The root domain redirects permanently to the canonical www address. DNS must already point to this server.</p>
+						<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+							<div class="md:col-span-2">
+								<label class="block text-sm font-medium text-gray-300 mb-1">Domain</label>
+								<input type="text" name="exposure_domain" value={ data.ExposureDomain } placeholder="example.com" class="w-full px-3 py-2 bg-dark-600 border border-dark-500 rounded-lg text-white placeholder-gray-500"/>
+							</div>
+							<div>
+								<label class="block text-sm font-medium text-gray-300 mb-1">Compose service</label>
+								<input type="text" name="exposure_service" value={ data.ExposureService } placeholder="web" class="w-full px-3 py-2 bg-dark-600 border border-dark-500 rounded-lg text-white placeholder-gray-500"/>
+							</div>
+							<div>
+								<label class="block text-sm font-medium text-gray-300 mb-1">Container port</label>
+								<input type="number" name="exposure_port" min="1" max="65535" value={ exposurePortValue(data.ExposurePort) } placeholder="80" class="w-full px-3 py-2 bg-dark-600 border border-dark-500 rounded-lg text-white placeholder-gray-500"/>
+							</div>
+						</div>
+						<label class="flex items-center gap-2 text-sm text-gray-400">
+							<input type="checkbox" name="exposure_websocket" value="true" checked?={ data.ExposureWebSocket } class="rounded border-dark-500 bg-dark-600"/>
+							Enable WebSocket/streaming support
+						</label>
 					</div>
 
 					if len(data.Fields) > 0 {
@@ -99,4 +135,18 @@ templ Install(data InstallData) {
 			</div>
 		</div>
 	}
+}
+
+func installName(data InstallData) string {
+	if data.Name != "" {
+		return data.Name
+	}
+	return data.App.Slug
+}
+
+func exposurePortValue(port int) string {
+	if port == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d", port)
 }

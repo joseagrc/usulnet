@@ -211,7 +211,12 @@ func (h *Handler) MarketplaceInstallTempl(w http.ResponseWriter, r *http.Request
 // per-app dynamic config (field_*) fields stay read via the r.Form
 // loop below because their names depend on the selected app.
 type marketplaceInstallForm struct {
-	Name string `form:"name"`
+	Name              string `form:"name"`
+	ExposePublicly    bool   `form:"expose_publicly"`
+	ExposureDomain    string `form:"exposure_domain"`
+	ExposureService   string `form:"exposure_service"`
+	ExposurePort      int    `form:"exposure_port"`
+	ExposureWebSocket bool   `form:"exposure_websocket"`
 }
 
 func (h *Handler) MarketplaceInstallCreateTempl(w http.ResponseWriter, r *http.Request) {
@@ -250,17 +255,29 @@ func (h *Handler) MarketplaceInstallCreateTempl(w http.ResponseWriter, r *http.R
 		ConfigValues: configValues,
 		UserID:       h.marketplaceUserUUID(r),
 	}
+	if form.ExposePublicly || strings.TrimSpace(form.ExposureDomain) != "" {
+		opts.Exposure = &marketplacesvc.ExposureOptions{
+			Domain:    form.ExposureDomain,
+			Service:   form.ExposureService,
+			Port:      form.ExposurePort,
+			WebSocket: form.ExposureWebSocket,
+		}
+	}
 	if _, err := svc.InstallApp(r.Context(), app.ID, hostID, opts); err != nil {
-		// Re-render the install form with the error so the user keeps
-		// their input. The previous form values are not yet
-		// re-populated; matching v26.2.7 behavior for now.
+		// Re-render the form without discarding the deployment choices.
 		fields := marketplaceFieldsToViews(app)
 		pageData := h.prepareTemplPageData(r, "Install "+app.Name, "marketplace")
 		_ = mktpl.Install(mktpl.InstallData{
-			PageData: pageData,
-			App:      marketplaceAppToView(app),
-			Fields:   fields,
-			Error:    err.Error(),
+			PageData:          pageData,
+			App:               marketplaceAppToView(app),
+			Fields:            fields,
+			Error:             err.Error(),
+			Name:              name,
+			ExposePublicly:    form.ExposePublicly,
+			ExposureDomain:    form.ExposureDomain,
+			ExposureService:   form.ExposureService,
+			ExposurePort:      form.ExposurePort,
+			ExposureWebSocket: form.ExposureWebSocket,
 		}).Render(r.Context(), w)
 		return
 	}

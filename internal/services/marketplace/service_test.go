@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/fr4nsys/usulnet/internal/models"
+	stacksvc "github.com/fr4nsys/usulnet/internal/services/stack"
 )
 
 // ----------------------------------------------------------------------------
@@ -315,6 +316,43 @@ type fakeStackInstaller struct {
 	last    *models.CreateStackInput
 	lastHID uuid.UUID
 	fail    error
+	deploy  *stacksvc.DeployResult
+	deleted int
+}
+
+func (f *fakeStackInstaller) Deploy(_ context.Context, id uuid.UUID) (*stacksvc.DeployResult, error) {
+	if f.deploy != nil {
+		return f.deploy, nil
+	}
+	return &stacksvc.DeployResult{StackID: id, Success: true}, nil
+}
+
+func (f *fakeStackInstaller) Delete(_ context.Context, _ uuid.UUID, _ bool) error {
+	f.deleted++
+	return nil
+}
+
+type fakeExposureManager struct {
+	created *models.CreateProxyHostInput
+	host    *models.ProxyHost
+	err     error
+	deleted int
+}
+
+func (f *fakeExposureManager) CreateHost(_ context.Context, input *models.CreateProxyHostInput, _ *uuid.UUID) (*models.ProxyHost, error) {
+	f.created = input
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.host == nil {
+		f.host = &models.ProxyHost{ID: uuid.New(), Status: models.ProxyHostStatusActive}
+	}
+	return f.host, nil
+}
+
+func (f *fakeExposureManager) DeleteHost(_ context.Context, _ uuid.UUID, _ *uuid.UUID) error {
+	f.deleted++
+	return nil
 }
 
 func (f *fakeStackInstaller) Create(ctx context.Context, hostID uuid.UUID, input *models.CreateStackInput) (*models.Stack, error) {
@@ -561,6 +599,128 @@ func TestService_InstallApp(t *testing.T) {
 	got, _ := apps.GetByID(context.Background(), appID)
 	if got.InstallCount != 1 {
 		t.Errorf("install_count: got %d, want 1", got.InstallCount)
+	}
+}
+
+func TestService_InstallAppWithExposure(t *testing.T) {
+	apps := newMemAppRepo()
+	stacks := &fakeStackInstaller{}
+	proxy := &fakeExposureManager{}
+	svc := NewService(apps, newMemInstallRepo(), newMemReviewRepo(), stacks, nil, nil)
+	svc.SetExposureManager(proxy)
+	svc.dnsCheck = func(context.Context, []string) error { return nil }
+	svc.publicProbe = func(context.Context, []string) error { return nil }
+	svc.probe = func(_ context.Context, address string) error {
+		if address != "demo-web:8080" {
+			t.Fatalf("probe address = %q", address)
+		}
+		return nil
+	}
+	appID := uuid.New()
+	_ = apps.Create(context.Background(), &models.MarketplaceApp{
+		ID: appID, Slug: "alpha", Name: "Alpha", Version: "1",
+		ComposeTemplate: "services:\n  web:\n    image: nginx:alpine\n",
+	})
+
+	inst, err := svc.InstallApp(context.Background(), appID, uuid.New(), InstallOptions{
+		Name: "demo", Exposure: &ExposureOptions{Domain: "example.com", Service: "web", Port: 8080},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst == nil || proxy.created == nil {
+		t.Fatal("installation or proxy was not created")
+	}
+	if proxy.created.UpstreamHost != "demo-web" || proxy.created.Domains[1] != "www.example.com" {
+		t.Fatalf("proxy input = %#v", proxy.created)
+	}
+	if !strings.Contains(stacks.last.ComposeFile, "proxy-caddy") {
+		t.Fatalf("compose was not exposed:\n%s", stacks.last.ComposeFile)
+	}
+}
+
+func TestService_InstallAppExposureRollback(t *testing.T) {
+	apps := newMemAppRepo()
+	stacks := &fakeStackInstaller{}
+	proxy := &fakeExposureManager{err: stderrors.New("caddy unavailable")}
+	svc := NewService(apps, newMemInstallRepo(), newMemReviewRepo(), stacks, nil, nil)
+	svc.SetExposureManager(proxy)
+	svc.dnsCheck = func(context.Context, []string) error { return nil }
+	svc.publicProbe = func(context.Context, []string) error { return nil }
+	svc.probe = func(context.Context, string) error { return nil }
+	appID := uuid.New()
+	_ = apps.Create(context.Background(), &models.MarketplaceApp{
+		ID: appID, Slug: "alpha", Name: "Alpha", ComposeTemplate: "services:\n  web:\n    image: nginx\n",
+	})
+
+	_, err := svc.InstallApp(context.Background(), appID, uuid.New(), InstallOptions{
+		Name: "demo", Exposure: &ExposureOptions{Domain: "example.com", Service: "web", Port: 80},
+	})
+	if err == nil {
+		t.Fatal("expected proxy failure")
+	}
+	if stacks.deleted != 1 {
+		t.Fatalf("stack rollback count = %d", stacks.deleted)
+	}
+}
+
+func TestService_InstallAppDeployRollback(t *testing.T) {
+	apps := newMemAppRepo()
+	stacks := &fakeStackInstaller{deploy: &stacksvc.DeployResult{Success: false, Error: "boom"}}
+	svc := NewService(apps, newMemInstallRepo(), newMemReviewRepo(), stacks, nil, nil)
+	svc.dnsCheck = func(context.Context, []string) error { return nil }
+	svc.publicProbe = func(context.Context, []string) error { return nil }
+	svc.probe = func(context.Context, string) error { return nil }
+	appID := uuid.New()
+	_ = apps.Create(context.Background(), &models.MarketplaceApp{
+		ID: appID, Slug: "alpha", Name: "Alpha", ComposeTemplate: "services:\n  web:\n    image: nginx\n",
+	})
+
+	_, err := svc.InstallApp(context.Background(), appID, uuid.New(), InstallOptions{
+		Name: "demo", Exposure: &ExposureOptions{Domain: "example.com", Service: "web", Port: 80},
+	})
+	if err == nil || stacks.deleted != 1 {
+		t.Fatalf("expected deploy rollback, err=%v deleted=%d", err, stacks.deleted)
+	}
+}
+
+func TestService_InstallAppRejectsUnreadyDNSBeforeCreatingStack(t *testing.T) {
+	apps := newMemAppRepo()
+	stacks := &fakeStackInstaller{}
+	svc := NewService(apps, newMemInstallRepo(), newMemReviewRepo(), stacks, nil, nil)
+	svc.dnsCheck = func(context.Context, []string) error { return stderrors.New("not resolved") }
+	appID := uuid.New()
+	_ = apps.Create(context.Background(), &models.MarketplaceApp{
+		ID: appID, Slug: "alpha", Name: "Alpha", ComposeTemplate: "services:\n  web:\n    image: nginx\n",
+	})
+
+	_, err := svc.InstallApp(context.Background(), appID, uuid.New(), InstallOptions{
+		Name: "demo", Exposure: &ExposureOptions{Domain: "example.com", Service: "web", Port: 80},
+	})
+	if err == nil || stacks.calls != 0 {
+		t.Fatalf("expected DNS failure before stack creation, err=%v calls=%d", err, stacks.calls)
+	}
+}
+
+func TestService_InstallAppPublicProbeRollback(t *testing.T) {
+	apps := newMemAppRepo()
+	stacks := &fakeStackInstaller{}
+	proxy := &fakeExposureManager{}
+	svc := NewService(apps, newMemInstallRepo(), newMemReviewRepo(), stacks, nil, nil)
+	svc.SetExposureManager(proxy)
+	svc.dnsCheck = func(context.Context, []string) error { return nil }
+	svc.probe = func(context.Context, string) error { return nil }
+	svc.publicProbe = func(context.Context, []string) error { return stderrors.New("TLS unavailable") }
+	appID := uuid.New()
+	_ = apps.Create(context.Background(), &models.MarketplaceApp{
+		ID: appID, Slug: "alpha", Name: "Alpha", ComposeTemplate: "services:\n  web:\n    image: nginx\n",
+	})
+
+	_, err := svc.InstallApp(context.Background(), appID, uuid.New(), InstallOptions{
+		Name: "demo", Exposure: &ExposureOptions{Domain: "example.com", Service: "web", Port: 80},
+	})
+	if err == nil || stacks.deleted != 1 || proxy.deleted != 1 {
+		t.Fatalf("expected proxy and stack rollback, err=%v stacks=%d proxy=%d", err, stacks.deleted, proxy.deleted)
 	}
 }
 

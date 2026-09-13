@@ -37,6 +37,7 @@ import (
 
 	"github.com/fr4nsys/usulnet/internal/models"
 	"github.com/fr4nsys/usulnet/internal/pkg/logger"
+	stacksvc "github.com/fr4nsys/usulnet/internal/services/stack"
 )
 
 // Sentinel errors returned by the service.
@@ -97,6 +98,21 @@ type StackInstaller interface {
 	Create(ctx context.Context, hostID uuid.UUID, input *models.CreateStackInput) (*models.Stack, error)
 }
 
+type stackDeployer interface {
+	Deploy(ctx context.Context, id uuid.UUID) (*stacksvc.DeployResult, error)
+}
+
+type stackDeleter interface {
+	Delete(ctx context.Context, id uuid.UUID, removeVolumes bool) error
+}
+
+// ExposureManager is the narrow proxy API used by Marketplace. It is wired
+// after the reverse-proxy backend is initialized.
+type ExposureManager interface {
+	CreateHost(ctx context.Context, input *models.CreateProxyHostInput, userID *uuid.UUID) (*models.ProxyHost, error)
+	DeleteHost(ctx context.Context, id uuid.UUID, userID *uuid.UUID) error
+}
+
 // CatalogSource enumerates the offline catalog entries. The
 // embedded marketplace package implements this; tests inject a
 // deterministic implementation. The interface is intentionally minimal
@@ -140,6 +156,10 @@ type Service struct {
 	installations InstallationRepository
 	reviews       ReviewRepository
 	stacks        StackInstaller
+	exposure      ExposureManager
+	probe         func(context.Context, string) error
+	dnsCheck      func(context.Context, []string) error
+	publicProbe   func(context.Context, []string) error
 	catalog       CatalogSource
 	logger        *logger.Logger
 }
@@ -164,10 +184,16 @@ func NewService(
 		installations: installations,
 		reviews:       reviews,
 		stacks:        stacks,
+		probe:         waitForTCP,
+		dnsCheck:      validateExposureDNS,
+		publicProbe:   waitForPublicEndpoint,
 		catalog:       catalog,
 		logger:        log.Named("marketplace"),
 	}
 }
+
+// SetExposureManager enables transactional public exposure for Marketplace.
+func (s *Service) SetExposureManager(manager ExposureManager) { s.exposure = manager }
 
 // ============================================================================
 // Catalog hydration
@@ -442,6 +468,10 @@ type InstallOptions struct {
 	// Name is the user-chosen instance name. Falls back to the app name.
 	Name string
 
+	// Exposure is optional. When set, Marketplace deploys the stack and only
+	// publishes the proxy after its selected upstream is reachable.
+	Exposure *ExposureOptions
+
 	// ConfigValues map field keys (defined in MarketplaceApp.Fields) to
 	// the user-provided string values. Missing keys fall through to
 	// the field's Default. Keys not declared by the manifest are left
@@ -467,6 +497,17 @@ func (s *Service) InstallApp(ctx context.Context, appID, hostID uuid.UUID, opts 
 	if s.stacks == nil {
 		return nil, ErrStackRequired
 	}
+	if err := opts.Exposure.Validate(); err != nil {
+		return nil, err
+	}
+	if opts.Exposure != nil {
+		if s.dnsCheck == nil {
+			s.dnsCheck = validateExposureDNS
+		}
+		if err := s.dnsCheck(ctx, opts.Exposure.domains()); err != nil {
+			return nil, fmt.Errorf("validate exposure DNS: %w", err)
+		}
+	}
 
 	app, err := s.apps.GetByID(ctx, appID)
 	if err != nil {
@@ -486,6 +527,11 @@ func (s *Service) InstallApp(ctx context.Context, appID, hostID uuid.UUID, opts 
 	if err != nil {
 		return nil, fmt.Errorf("render compose: %w", err)
 	}
+	upstreamAlias := ""
+	composeBody, upstreamAlias, err = ApplyExposureToCompose(composeBody, name, opts.Exposure)
+	if err != nil {
+		return nil, err
+	}
 
 	stack, err := s.stacks.Create(ctx, hostID, &models.CreateStackInput{
 		Name:        name,
@@ -493,6 +539,78 @@ func (s *Service) InstallApp(ctx context.Context, appID, hostID uuid.UUID, opts 
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create stack: %w", err)
+	}
+
+	rollbackStack := func() {
+		if deleter, ok := s.stacks.(stackDeleter); ok {
+			if err := deleter.Delete(context.Background(), stack.ID, false); err != nil {
+				s.logger.Error("Marketplace rollback: failed to delete stack", "stack_id", stack.ID, "error", err)
+			}
+		}
+	}
+
+	var proxyHost *models.ProxyHost
+	if opts.Exposure != nil {
+		deployer, ok := s.stacks.(stackDeployer)
+		if !ok {
+			rollbackStack()
+			return nil, fmt.Errorf("%w: stack deploy capability is unavailable", ErrStackRequired)
+		}
+		result, deployErr := deployer.Deploy(ctx, stack.ID)
+		if deployErr != nil || result == nil || !result.Success {
+			rollbackStack()
+			if deployErr != nil {
+				return nil, fmt.Errorf("deploy stack: %w", deployErr)
+			}
+			message := "deployment failed"
+			if result != nil && result.Error != "" {
+				message = result.Error
+			}
+			return nil, fmt.Errorf("deploy stack: %s", message)
+		}
+		if s.probe == nil {
+			s.probe = waitForTCP
+		}
+		address := fmt.Sprintf("%s:%d", upstreamAlias, opts.Exposure.Port)
+		if err := s.probe(ctx, address); err != nil {
+			rollbackStack()
+			return nil, fmt.Errorf("verify deployed service: %w", err)
+		}
+		if s.exposure == nil {
+			rollbackStack()
+			return nil, fmt.Errorf("%w: reverse proxy service is unavailable", ErrStackRequired)
+		}
+		proxyHost, err = s.exposure.CreateHost(ctx, &models.CreateProxyHostInput{
+			Name:              name,
+			Domains:           opts.Exposure.domains(),
+			UpstreamScheme:    models.ProxyUpstreamHTTP,
+			UpstreamHost:      upstreamAlias,
+			UpstreamPort:      opts.Exposure.Port,
+			SSLMode:           models.ProxySSLModeAuto,
+			SSLForceHTTPS:     true,
+			EnableWebSocket:   opts.Exposure.WebSocket,
+			EnableCompression: true,
+			EnableHSTS:        true,
+			EnableHTTP2:       true,
+		}, opts.UserID)
+		if err != nil || proxyHost == nil || proxyHost.Status != models.ProxyHostStatusActive {
+			if proxyHost != nil {
+				_ = s.exposure.DeleteHost(context.Background(), proxyHost.ID, opts.UserID)
+			}
+			rollbackStack()
+			if err != nil {
+				return nil, fmt.Errorf("create public proxy: %w", err)
+			}
+			return nil, fmt.Errorf("create public proxy: synchronization did not become active")
+		}
+		if s.publicProbe == nil {
+			s.publicProbe = waitForPublicEndpoint
+		}
+		if err := s.publicProbe(ctx, opts.Exposure.domains()); err != nil {
+			_ = s.exposure.DeleteHost(context.Background(), proxyHost.ID, opts.UserID)
+			rollbackStack()
+			return nil, fmt.Errorf("verify public endpoint: %w", err)
+		}
 	}
 
 	configJSON, _ := json.Marshal(resolved)
@@ -508,9 +626,10 @@ func (s *Service) InstallApp(ctx context.Context, appID, hostID uuid.UUID, opts 
 		InstalledBy:  opts.UserID,
 	}
 	if err := s.installations.Create(ctx, inst); err != nil {
-		// Stack is already created; the installation row failing to
-		// persist is a real bug — surface it. The operator can delete
-		// the stack manually if needed.
+		if proxyHost != nil && s.exposure != nil {
+			_ = s.exposure.DeleteHost(context.Background(), proxyHost.ID, opts.UserID)
+		}
+		rollbackStack()
 		return nil, fmt.Errorf("create installation: %w", err)
 	}
 

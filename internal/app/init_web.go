@@ -33,8 +33,8 @@ import (
 	logaggsvc "github.com/fr4nsys/usulnet/internal/services/logagg"
 	manifestsvc "github.com/fr4nsys/usulnet/internal/services/manifest"
 	metricssvc "github.com/fr4nsys/usulnet/internal/services/metrics"
-	onboardingsvc "github.com/fr4nsys/usulnet/internal/services/onboarding"
 	monitoringsvc "github.com/fr4nsys/usulnet/internal/services/monitoring"
+	onboardingsvc "github.com/fr4nsys/usulnet/internal/services/onboarding"
 	opasvc "github.com/fr4nsys/usulnet/internal/services/opa"
 	proxysvc "github.com/fr4nsys/usulnet/internal/services/proxy"
 	"github.com/fr4nsys/usulnet/internal/services/proxy/caddy"
@@ -257,6 +257,9 @@ func (app *Application) initWeb(ctx context.Context, ic *initContext) error {
 			postgres.NewProxyRedirectionRepository(app.DB, app.Logger),
 			postgres.NewProxyStreamRepository(app.DB, app.Logger),
 		)
+		if ic.marketplaceService != nil {
+			ic.marketplaceService.SetExposureManager(proxyService)
+		}
 
 		regDeps.ProxyService = proxyService
 
