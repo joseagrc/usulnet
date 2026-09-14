@@ -24,7 +24,7 @@ func BuildConfig(hosts []*models.ProxyHost, dnsProviders map[string]*models.Prox
 		listenHTTPS = ":443"
 	}
 
-	routes := make([]Route, 0, len(hosts))
+	routes := make([]Route, 0, len(hosts)*2)
 	tlsPolicies := make([]TLSAutomationPolicy, 0)
 	pemCerts := make([]LoadPEMCert, 0)
 	skipHTTPS := make([]string, 0)
@@ -34,6 +34,9 @@ func BuildConfig(hosts []*models.ProxyHost, dnsProviders map[string]*models.Prox
 			continue
 		}
 
+		if h.SSLForceHTTPS && h.SSLMode != models.ProxySSLModeNone {
+			routes = append(routes, buildForceHTTPSRoute(h))
+		}
 		routes = append(routes, buildRoutes(h)...)
 
 		// TLS policy per host
@@ -123,6 +126,30 @@ func BuildConfig(hosts []*models.ProxyHost, dnsProviders map[string]*models.Prox
 			},
 			TLS: tlsApp,
 		},
+	}
+}
+
+// buildForceHTTPSRoute redirects only plaintext requests. The generated Caddy
+// server listens on :80 and :443, so automatic HTTPS does not get a separate
+// HTTP-only server on which it can install redirects. Without this explicit
+// protocol matcher, ssl_force_https is persisted but has no effect.
+func buildForceHTTPSRoute(h *models.ProxyHost) Route {
+	redirect := StaticResponseHandler{
+		Handler:    "static_response",
+		StatusCode: 308,
+		Headers: map[string][]string{
+			"Location": {"https://{http.request.host}{http.request.uri}"},
+		},
+	}
+
+	return Route{
+		ID: "usulnet-" + h.ID.String() + "-force-https",
+		Match: []MatchConfig{{
+			Host:     h.Domains,
+			Protocol: "http",
+		}},
+		Handle:   []json.RawMessage{mustMarshal(redirect)},
+		Terminal: true,
 	}
 }
 

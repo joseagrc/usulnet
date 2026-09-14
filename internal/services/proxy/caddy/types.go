@@ -60,8 +60,9 @@ type Route struct {
 
 // MatchConfig defines route matching rules.
 type MatchConfig struct {
-	Host []string `json:"host,omitempty"`
-	Path []string `json:"path,omitempty"`
+	Host     []string `json:"host,omitempty"`
+	Path     []string `json:"path,omitempty"`
+	Protocol string   `json:"protocol,omitempty"`
 }
 
 // ---- Handler types (serialized as json.RawMessage in Route.Handle) ----
