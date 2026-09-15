@@ -645,6 +645,7 @@ type ProxyHostView struct {
 	ID                    int      `json:"id"`
 	DomainNames           []string `json:"domain_names,omitempty"`
 	Domain                string   `json:"domain"`
+	IncludeWWW            bool     `json:"include_www"`
 	ForwardScheme         string   `json:"forward_scheme"`
 	ForwardHost           string   `json:"forward_host"`
 	ForwardPort           int      `json:"forward_port"`

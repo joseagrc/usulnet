@@ -246,6 +246,7 @@ func (h *Handler) ProxyNewTempl(w http.ResponseWriter, r *http.Request) {
 // and keeps the operator out of an NPM error response.
 type proxyHostForm struct {
 	Domain                string `form:"domain" validate:"required"`
+	IncludeWWW            bool   `form:"include_www"`
 	ForwardScheme         string `form:"forward_scheme"`
 	ForwardHost           string `form:"forward_host" validate:"required"`
 	ForwardPort           int    `form:"forward_port" validate:"required,gt=0,lte=65535"`
@@ -289,6 +290,8 @@ func (h *Handler) ProxyHostCreateTempl(w http.ResponseWriter, r *http.Request) {
 
 	host := &ProxyHostView{
 		Domain:                form.Domain,
+		DomainNames:           proxyDomains(form.Domain, form.IncludeWWW),
+		IncludeWWW:            form.IncludeWWW,
 		ForwardScheme:         forwardScheme,
 		ForwardHost:           form.ForwardHost,
 		ForwardPort:           form.ForwardPort,
@@ -351,6 +354,7 @@ func (h *Handler) ProxyDetailTempl(w http.ResponseWriter, r *http.Request) {
 		Host: proxy.ProxyHost{
 			ID:            idStr,
 			DomainName:    host.Domain,
+			IncludeWWW:    host.IncludeWWW,
 			ForwardHost:   host.ForwardHost,
 			ForwardPort:   host.ForwardPort,
 			SSLEnabled:    host.SSLEnabled,
@@ -451,6 +455,8 @@ func (h *Handler) ProxyHostUpdateTempl(w http.ResponseWriter, r *http.Request) {
 	host := &ProxyHostView{
 		ID:                    id,
 		Domain:                form.Domain,
+		DomainNames:           proxyDomains(form.Domain, form.IncludeWWW),
+		IncludeWWW:            form.IncludeWWW,
 		ForwardScheme:         forwardScheme,
 		ForwardHost:           form.ForwardHost,
 		ForwardPort:           form.ForwardPort,
@@ -476,6 +482,7 @@ func (h *Handler) ProxyHostUpdateTempl(w http.ResponseWriter, r *http.Request) {
 			Host: proxy.ProxyHost{
 				ID:          idStr,
 				DomainName:  form.Domain,
+				IncludeWWW:  form.IncludeWWW,
 				ForwardHost: form.ForwardHost,
 				ForwardPort: form.ForwardPort,
 				SSLEnabled:  form.SSLEnabled,

@@ -162,40 +162,50 @@ func Edit(data EditData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\" min=\"1\" max=\"65535\" required class=\"w-full bg-dark-800 border border-dark-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-accent-500 focus:border-transparent\" aria-label=\"Forward Port\"></div></div><div class=\"flex items-center gap-6 pt-2\"><label class=\"flex items-center gap-2 text-sm text-gray-300 cursor-pointer\"><input type=\"checkbox\" name=\"ssl_enabled\" value=\"true\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\" min=\"1\" max=\"65535\" required class=\"w-full bg-dark-800 border border-dark-600 text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-accent-500 focus:border-transparent\" aria-label=\"Forward Port\"></div></div><div class=\"flex items-center gap-6 pt-2\"><label class=\"flex items-start gap-2 text-sm text-gray-300 cursor-pointer\"><input type=\"checkbox\" name=\"include_www\" value=\"true\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if data.Host.SSLEnabled {
+			if data.Host.IncludeWWW {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, " checked")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, " class=\"rounded border-dark-600 bg-dark-800 text-accent-500 focus:ring-accent-500\"> Enable SSL</label> <label class=\"flex items-center gap-2 text-sm text-gray-300 cursor-pointer\"><input type=\"checkbox\" name=\"enabled\" value=\"true\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, " class=\"mt-0.5 rounded border-dark-600 bg-dark-800 text-accent-500 focus:ring-accent-500\"> <span>Include <code>www.</code> alias <span class=\"block text-xs text-gray-500\">Both names must resolve to this server for TLS.</span></span></label> <label class=\"flex items-center gap-2 text-sm text-gray-300 cursor-pointer\"><input type=\"checkbox\" name=\"ssl_enabled\" value=\"true\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if data.Host.Enabled {
+			if data.Host.SSLEnabled {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, " checked")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, " class=\"rounded border-dark-600 bg-dark-800 text-accent-500 focus:ring-accent-500\"> Enabled</label></div><div class=\"flex gap-2 pt-4\"><button type=\"submit\" class=\"btn btn-primary\"><i aria-hidden=\"true\" class=\"fas fa-save mr-1\"></i> Save Changes</button> <a href=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, " class=\"rounded border-dark-600 bg-dark-800 text-accent-500 focus:ring-accent-500\"> Enable SSL</label> <label class=\"flex items-center gap-2 text-sm text-gray-300 cursor-pointer\"><input type=\"checkbox\" name=\"enabled\" value=\"true\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if data.Host.Enabled {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, " checked")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, " class=\"rounded border-dark-600 bg-dark-800 text-accent-500 focus:ring-accent-500\"> Enabled</label></div><div class=\"flex gap-2 pt-4\"><button type=\"submit\" class=\"btn btn-primary\"><i aria-hidden=\"true\" class=\"fas fa-save mr-1\"></i> Save Changes</button> <a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var10 templ.SafeURL
 			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/proxy/%s", data.Host.ID)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/proxy/edit.templ`, Line: 102, Col: 69}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/templates/pages/proxy/edit.templ`, Line: 114, Col: 69}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\" class=\"btn btn-secondary\">Cancel</a></div></form></div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "\" class=\"btn btn-secondary\">Cancel</a></div></form></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

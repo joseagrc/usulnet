@@ -66,6 +66,10 @@ templ New(data NewData) {
 						</div>
 					</div>
 					<div class="flex items-center gap-6 pt-2">
+						<label class="flex items-start gap-2 text-sm text-gray-300 cursor-pointer">
+							<input type="checkbox" name="include_www" value="true" class="mt-0.5 rounded border-dark-600 bg-dark-800 text-accent-500 focus:ring-accent-500"/>
+							<span>Include <code>www.</code> alias <span class="block text-xs text-gray-500">Adds it to this proxy and its TLS certificate. Ensure its DNS record resolves here.</span></span>
+						</label>
 						<label class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
 							<input type="checkbox" name="ssl_enabled" value="true" class="rounded border-dark-600 bg-dark-800 text-accent-500 focus:ring-accent-500"/>
 							Enable SSL

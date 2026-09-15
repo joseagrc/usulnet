@@ -63,9 +63,13 @@ func (a *caddyProxyAdapter) GetHost(ctx context.Context, id int) (*ProxyHostView
 }
 
 func (a *caddyProxyAdapter) CreateHost(ctx context.Context, v *ProxyHostView) error {
+	domains := v.DomainNames
+	if len(domains) == 0 {
+		domains = proxyDomains(v.Domain, v.IncludeWWW)
+	}
 	input := &models.CreateProxyHostInput{
 		Name:              v.Domain,
-		Domains:           []string{v.Domain},
+		Domains:           domains,
 		UpstreamScheme:    models.ProxyUpstreamHTTP,
 		UpstreamHost:      v.ForwardHost,
 		UpstreamPort:      v.ForwardPort,
@@ -101,9 +105,13 @@ func (a *caddyProxyAdapter) UpdateHost(ctx context.Context, v *ProxyHostView) er
 		sslMode = models.ProxySSLModeNone
 	}
 
+	domains := v.DomainNames
+	if len(domains) == 0 {
+		domains = proxyDomains(v.Domain, v.IncludeWWW)
+	}
 	input := &models.UpdateProxyHostInput{
 		Name:           &v.Domain,
-		Domains:        []string{v.Domain},
+		Domains:        domains,
 		UpstreamScheme: &scheme,
 		UpstreamHost:   &v.ForwardHost,
 		UpstreamPort:   &v.ForwardPort,
@@ -556,7 +564,9 @@ func proxyHostToView(h *models.ProxyHost) ProxyHostView {
 
 	return ProxyHostView{
 		ID:          hashUUIDToInt(h.ID), // Stable int ID from UUID
+		DomainNames: append([]string(nil), h.Domains...),
 		Domain:      domain,
+		IncludeWWW:  hasWWWAlias(h.Domains, domain),
 		ForwardHost: h.UpstreamHost,
 		ForwardPort: h.UpstreamPort,
 		SSLEnabled:  h.SSLMode != models.ProxySSLModeNone,
