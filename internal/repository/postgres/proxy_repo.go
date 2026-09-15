@@ -100,7 +100,18 @@ func (r *ProxyHostRepository) GetByID(ctx context.Context, id uuid.UUID) (*model
 
 // List retrieves proxy hosts for a host, optionally filtered.
 func (r *ProxyHostRepository) List(ctx context.Context, hostID uuid.UUID, enabledOnly bool) ([]*models.ProxyHost, error) {
-	query := `SELECT * FROM proxy_hosts WHERE host_id = $1`
+	// Keep the projection explicit.  Some older installations retain extra
+	// compatibility columns in proxy_hosts (or in a view backing it); pgx's
+	// RowToAddrOfStructByName intentionally rejects columns not represented by
+	// models.ProxyHost, which previously made the web UI show an empty list.
+	query := `SELECT id, host_id, name, domains, enabled, status, status_message,
+		upstream_scheme, upstream_host, upstream_port, upstream_path,
+		ssl_mode, ssl_force_https, certificate_id, dns_provider_id,
+		enable_websocket, enable_compression, enable_hsts, enable_http2,
+		health_check_enabled, health_check_path, health_check_interval,
+		container_id, container_name, auto_created, created_by, updated_by,
+		created_at, updated_at
+		FROM proxy_hosts WHERE host_id = $1`
 	args := []interface{}{hostID}
 
 	if enabledOnly {
@@ -119,7 +130,14 @@ func (r *ProxyHostRepository) List(ctx context.Context, hostID uuid.UUID, enable
 
 // ListAll retrieves all proxy hosts across all usulnet hosts (for global sync).
 func (r *ProxyHostRepository) ListAll(ctx context.Context, enabledOnly bool) ([]*models.ProxyHost, error) {
-	query := `SELECT * FROM proxy_hosts`
+	query := `SELECT id, host_id, name, domains, enabled, status, status_message,
+		upstream_scheme, upstream_host, upstream_port, upstream_path,
+		ssl_mode, ssl_force_https, certificate_id, dns_provider_id,
+		enable_websocket, enable_compression, enable_hsts, enable_http2,
+		health_check_enabled, health_check_path, health_check_interval,
+		container_id, container_name, auto_created, created_by, updated_by,
+		created_at, updated_at
+		FROM proxy_hosts`
 	if enabledOnly {
 		query += ` WHERE enabled = true`
 	}
